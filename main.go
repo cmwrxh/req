@@ -18,9 +18,10 @@ var (
     green  = color.New(color.FgGreen).SprintFunc()
     yellow = color.New(color.FgYellow).SprintFunc()
     red    = color.New(color.FgRed).SprintFunc()
-)
 
-var data string
+    data    string
+    headers []string
+)
 
 func main() {
     var rootCmd = &cobra.Command{
@@ -28,13 +29,17 @@ func main() {
         Short: "Minimalist HTTP client",
     }
 
-    get := getCmd()
-    post := postCmd()
+    getCmd := getCmd()
+    postCmd := postCmd()
 
-    get.Flags().StringVarP(&data, "data", "d", "", "JSON data for POST/PUT")
-    post.Flags().StringVarP(&data, "data", "d", "", "JSON data for POST/PUT")
+    // Define flags once per command
+    getCmd.Flags().StringVarP(&data, "data", "d", "", "JSON data for request body")
+    getCmd.Flags().StringSliceVarP(&headers, "header", "H", []string{}, "Custom headers (e.g. -H 'Authorization: Bearer token')")
 
-    rootCmd.AddCommand(get, post)
+    postCmd.Flags().StringVarP(&data, "data", "d", "", "JSON data for request body")
+    postCmd.Flags().StringSliceVarP(&headers, "header", "H", []string{}, "Custom headers (e.g. -H 'Authorization: Bearer token')")
+
+    rootCmd.AddCommand(getCmd, postCmd)
 
     if err := rootCmd.Execute(); err != nil {
         fmt.Fprintln(os.Stderr, err)
@@ -48,7 +53,7 @@ func getCmd() *cobra.Command {
         Short: "Send GET request",
         Args:  cobra.ExactArgs(1),
         Run: func(cmd *cobra.Command, args []string) {
-            doRequest("GET", args[0], "")
+            doRequest("GET", args[0], data)
         },
     }
 }
@@ -66,11 +71,11 @@ func postCmd() *cobra.Command {
 
 func doRequest(method, url, bodyStr string) {
     var body io.Reader
-    headers := make(map[string]string)
+    contentType := ""
 
     if bodyStr != "" {
         body = strings.NewReader(bodyStr)
-        headers["Content-Type"] = "application/json"
+        contentType = "application/json"
     }
 
     req, err := http.NewRequest(method, url, body)
@@ -79,8 +84,21 @@ func doRequest(method, url, bodyStr string) {
         os.Exit(1)
     }
 
-    for k, v := range headers {
-        req.Header.Set(k, v)
+    // Set Content-Type if body is present
+    if contentType != "" {
+        req.Header.Set("Content-Type", contentType)
+    }
+
+    // Apply custom headers from --header / -H flags
+    for _, h := range headers {
+        parts := strings.SplitN(h, ":", 2)
+        if len(parts) == 2 {
+            key := strings.TrimSpace(parts[0])
+            value := strings.TrimSpace(parts[1])
+            req.Header.Set(key, value)
+        } else {
+            fmt.Fprintf(os.Stderr, "%s Invalid header format: %s (use 'Key: Value')\n", red("Warning:"), h)
+        }
     }
 
     client := &http.Client{}
@@ -91,14 +109,18 @@ func doRequest(method, url, bodyStr string) {
     }
     defer resp.Body.Close()
 
-    bodyBytes, _ := io.ReadAll(resp.Body)
+    bodyBytes, err := io.ReadAll(resp.Body)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "%s Failed to read response: %v\n", red("Error:"), err)
+        os.Exit(1)
+    }
 
     fmt.Printf("%s %s\n", green(method), blue(url))
-    fmt.Printf("%s %d\n", yellow("Status:"), resp.StatusCode)
+    fmt.Printf("%s %d %s\n", yellow("Status:"), resp.StatusCode, resp.Status)
 
-    // Pretty print JSON response if possible
+    // Pretty-print JSON if possible
     var pretty json.RawMessage
-    if err := json.Unmarshal(bodyBytes, &pretty); err == nil {
+    if json.Unmarshal(bodyBytes, &pretty) == nil {
         prettyJSON, _ := json.MarshalIndent(pretty, "", "  ")
         fmt.Println(string(prettyJSON))
     } else {
