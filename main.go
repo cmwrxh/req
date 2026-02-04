@@ -1,7 +1,6 @@
 package main
 
 import (
-    "bytes"
     "encoding/json"
     "fmt"
     "io"
@@ -18,10 +17,10 @@ var (
     green  = color.New(color.FgGreen).SprintFunc()
     yellow = color.New(color.FgYellow).SprintFunc()
     red    = color.New(color.FgRed).SprintFunc()
-
-    data    string
-    headers []string
 )
+
+var data string
+var headers []string
 
 func main() {
     var rootCmd = &cobra.Command{
@@ -29,17 +28,16 @@ func main() {
         Short: "Minimalist HTTP client",
     }
 
-    getCmd := getCmd()
-    postCmd := postCmd()
+    get := getCmd()
+    post := postCmd()
 
-    // Define flags once per command
-    getCmd.Flags().StringVarP(&data, "data", "d", "", "JSON data for request body")
-    getCmd.Flags().StringSliceVarP(&headers, "header", "H", []string{}, "Custom headers (e.g. -H 'Authorization: Bearer token')")
+    get.Flags().StringVarP(&data, "data", "d", "", "JSON data for POST/PUT")
+    post.Flags().StringVarP(&data, "data", "d", "", "JSON data for POST/PUT")
 
-    postCmd.Flags().StringVarP(&data, "data", "d", "", "JSON data for request body")
-    postCmd.Flags().StringSliceVarP(&headers, "header", "H", []string{}, "Custom headers (e.g. -H 'Authorization: Bearer token')")
+    get.Flags().StringSliceVarP(&headers, "header", "H", nil, "Custom header (can be repeated) -H 'Authorization: Bearer xyz'")
+    post.Flags().StringSliceVarP(&headers, "header", "H", nil, "Custom header (can be repeated) -H 'Authorization: Bearer xyz'")
 
-    rootCmd.AddCommand(getCmd, postCmd)
+    rootCmd.AddCommand(get, post)
 
     if err := rootCmd.Execute(); err != nil {
         fmt.Fprintln(os.Stderr, err)
@@ -53,7 +51,7 @@ func getCmd() *cobra.Command {
         Short: "Send GET request",
         Args:  cobra.ExactArgs(1),
         Run: func(cmd *cobra.Command, args []string) {
-            doRequest("GET", args[0], data)
+            doRequest("GET", args[0], "")
         },
     }
 }
@@ -71,11 +69,9 @@ func postCmd() *cobra.Command {
 
 func doRequest(method, url, bodyStr string) {
     var body io.Reader
-    contentType := ""
 
     if bodyStr != "" {
         body = strings.NewReader(bodyStr)
-        contentType = "application/json"
     }
 
     req, err := http.NewRequest(method, url, body)
@@ -84,21 +80,21 @@ func doRequest(method, url, bodyStr string) {
         os.Exit(1)
     }
 
-    // Set Content-Type if body is present
-    if contentType != "" {
-        req.Header.Set("Content-Type", contentType)
+    // Default Content-Type for JSON bodies
+    if bodyStr != "" {
+        req.Header.Set("Content-Type", "application/json")
     }
 
-    // Apply custom headers from --header / -H flags
+    // Apply custom headers
     for _, h := range headers {
         parts := strings.SplitN(h, ":", 2)
-        if len(parts) == 2 {
-            key := strings.TrimSpace(parts[0])
-            value := strings.TrimSpace(parts[1])
-            req.Header.Set(key, value)
-        } else {
-            fmt.Fprintf(os.Stderr, "%s Invalid header format: %s (use 'Key: Value')\n", red("Warning:"), h)
+        if len(parts) != 2 {
+            fmt.Fprintf(os.Stderr, "%s invalid header format: %s (use Key: Value)\n", red("Error:"), h)
+            os.Exit(1)
         }
+        key := strings.TrimSpace(parts[0])
+        val := strings.TrimSpace(parts[1])
+        req.Header.Set(key, val)
     }
 
     client := &http.Client{}
@@ -109,18 +105,14 @@ func doRequest(method, url, bodyStr string) {
     }
     defer resp.Body.Close()
 
-    bodyBytes, err := io.ReadAll(resp.Body)
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "%s Failed to read response: %v\n", red("Error:"), err)
-        os.Exit(1)
-    }
+    bodyBytes, _ := io.ReadAll(resp.Body)
 
     fmt.Printf("%s %s\n", green(method), blue(url))
-    fmt.Printf("%s %d %s\n", yellow("Status:"), resp.StatusCode, resp.Status)
+    fmt.Printf("%s %d\n", yellow("Status:"), resp.StatusCode)
 
-    // Pretty-print JSON if possible
+    // Pretty print JSON response if possible
     var pretty json.RawMessage
-    if json.Unmarshal(bodyBytes, &pretty) == nil {
+    if err := json.Unmarshal(bodyBytes, &pretty); err == nil {
         prettyJSON, _ := json.MarshalIndent(pretty, "", "  ")
         fmt.Println(string(prettyJSON))
     } else {
