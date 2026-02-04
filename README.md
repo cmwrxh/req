@@ -1,17 +1,25 @@
 # req
 
-A minimalist, fast HTTP client CLI written in Go — inspired by httpie but even simpler.
+Minimalist HTTP client CLI written in Go — fast, colorful, and simple.
 
-Commands:
-- GET / POST / PUT / DELETE
-- JSON body support (-d or --data)
-- Headers (-H)
-- Pretty-printed JSON output
-- Save/load request templates (future)
+Inspired by httpie, but even lighter.
 
-Built in exactly 9 clean commits.
+## Features
+- GET and POST requests
+- JSON body support (`-d` / `--data`)
+- Custom headers (`-H` / `--header`, multiple allowed)
+- Colored output (method, URL, status codes)
+- Automatic pretty-printing of JSON responses
+- Clear error messages
 
-## Build & Run (once cloned locally)
+## Installation
+
 ```bash
+# Install globally (recommended)
+go install github.com/cmwrxh/req@latest
+
+# Or build from source
+git clone https://github.com/cmwrxh/req.git
+cd req
 go build -o req
-./req get https://jsonplaceholder.typicode.com/todos/1
+# Move ./req to a directory in your $PATH (optional)
